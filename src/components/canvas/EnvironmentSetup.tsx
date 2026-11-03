@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useThree } from '@react-three/fiber';
 import {
   Environment,
   Lightformer,
@@ -9,117 +10,171 @@ import {
   ContactShadows,
   SoftShadows,
 } from '@react-three/drei';
-import { useTourStore } from '@/store/useTourStore';
+import * as THREE from 'three';
+import gsap from 'gsap';
+import { useTourStore, TimeOfDay } from '@/store/useTourStore';
+
+const TRANSITION_DURATION = 1.5;
+
+const TIME_PHASE_MAP: Record<TimeOfDay, number> = {
+  day: 0,
+  sunset: 0.5,
+  night: 1,
+};
 
 export function EnvironmentSetup() {
+  const { scene } = useThree();
   const { timeOfDay, qualityPreset } = useTourStore();
 
-  const envConfig = useMemo(() => {
-    switch (timeOfDay) {
-      case 'day':
-        return {
-          sunPosition: [22, 30, 16] as [number, number, number],
-          directionalIntensity: 3.2,
-          directionalColor: '#fff8eb',
-          ambientIntensity: 0.45,
-          ambientColor: '#dce8ff',
-          hemiSky: '#e8f1ff',
-          hemiGround: '#3d352e',
-          hemiIntensity: 0.65,
-          fogColor: '#c9d6e8',
-          fogNear: 24,
-          fogFar: 95,
-          turbidity: 2.2,
-          rayleigh: 0.75,
-          envIntensity: 1.2,
-          skyZenithColor: '#9ec5ff',
-          skyHorizonColor: '#fff4e0',
-          sunLightformerColor: '#fff5dc',
-          sunLightformerIntensity: 6,
-          zenithLightIntensity: 2.4,
-        };
-      case 'sunset':
-        return {
-          sunPosition: [-26, 4.8, -16] as [number, number, number],
-          directionalIntensity: 2.6,
-          directionalColor: '#ff8e47',
-          ambientIntensity: 0.3,
-          ambientColor: '#ffb38a',
-          hemiSky: '#ff9e6d',
-          hemiGround: '#1f1924',
-          hemiIntensity: 0.55,
-          fogColor: '#1a1520',
-          fogNear: 20,
-          fogFar: 78,
-          turbidity: 8.5,
-          rayleigh: 2.8,
-          envIntensity: 1.05,
-          skyZenithColor: '#3b2d54',
-          skyHorizonColor: '#ff7b3d',
-          sunLightformerColor: '#ff8533',
-          sunLightformerIntensity: 8,
-          zenithLightIntensity: 1.4,
-        };
-      case 'night':
-        return {
-          sunPosition: [-15, 14, -20] as [number, number, number],
-          directionalIntensity: 0.45,
-          directionalColor: '#6b8cff',
-          ambientIntensity: 0.15,
-          ambientColor: '#1a2442',
-          hemiSky: '#1c294f',
-          hemiGround: '#090b10',
-          hemiIntensity: 0.3,
-          fogColor: '#07090e',
-          fogNear: 16,
-          fogFar: 65,
-          turbidity: 10,
-          rayleigh: 0.2,
-          envIntensity: 0.65,
-          skyZenithColor: '#0b132b',
-          skyHorizonColor: '#1c2541',
-          sunLightformerColor: '#4f75ff',
-          sunLightformerIntensity: 2.2,
-          zenithLightIntensity: 0.5,
-        };
-    }
-  }, [timeOfDay]);
+  const dirLightRef = useRef<THREE.DirectionalLight>(null);
+  const ambientLightRef = useRef<THREE.AmbientLight>(null);
+  const hemiLightRef = useRef<THREE.HemisphereLight>(null);
+  const zenithSpotRef = useRef<THREE.SpotLight>(null);
+
+  // Estado contínuo de fase solar (0 = Dia, 0.5 = Pôr do Sol, 1 = Noite)
+  // Permite que a transição Dia -> Noite passe pelo arco do pôr do sol em 1.5s
+  const phaseRef = useRef<{ value: number }>({
+    value: TIME_PHASE_MAP[timeOfDay],
+  });
+
+  const [skyParams, setSkyParams] = useState<{
+    sunPosition: [number, number, number];
+    turbidity: number;
+    rayleigh: number;
+    isNightSky: boolean;
+  }>({
+    sunPosition: [-26, 4.8, -16],
+    turbidity: 8.5,
+    rayleigh: 2.8,
+    isNightSky: false,
+  });
+
+  useEffect(() => {
+    const targetPhase = TIME_PHASE_MAP[timeOfDay];
+
+    const dayBg = new THREE.Color('#c9d6e8');
+    const sunsetBg = new THREE.Color('#1f1624');
+    const nightBg = new THREE.Color('#07090e');
+
+    const daySunColor = new THREE.Color('#fff8eb');
+    const sunsetSunColor = new THREE.Color('#ff853b');
+    const nightMoonColor = new THREE.Color('#4f70db');
+
+    const dayAmbColor = new THREE.Color('#dce8ff');
+    const sunsetAmbColor = new THREE.Color('#ffad80');
+    const nightAmbColor = new THREE.Color('#16203d');
+
+    gsap.killTweensOf(phaseRef.current);
+
+    gsap.to(phaseRef.current, {
+      value: targetPhase,
+      duration: TRANSITION_DURATION,
+      ease: 'power2.inOut',
+      onUpdate: () => {
+        const p = phaseRef.current.value; // 0..1
+
+        // 1. Declinação do ângulo solar simulando o arco do pôr do sol antes de sumir no horizonte
+        const sunX = THREE.MathUtils.lerp(22, -28, Math.min(p * 1.4, 1));
+        const sunY =
+          p <= 0.5
+            ? THREE.MathUtils.lerp(30, 3.8, p * 2)
+            : THREE.MathUtils.lerp(3.8, -8.0, (p - 0.5) * 2);
+        const sunZ = THREE.MathUtils.lerp(16, -18, p);
+
+        if (dirLightRef.current) {
+          dirLightRef.current.position.set(sunX, Math.max(sunY, 2.5), sunZ);
+
+          // Intensidade solar reduz gradualmente até a luz noturna sutil
+          const dirIntensity =
+            p <= 0.5
+              ? THREE.MathUtils.lerp(3.2, 2.4, p * 2)
+              : THREE.MathUtils.lerp(2.4, 0.28, (p - 0.5) * 2);
+          dirLightRef.current.intensity = dirIntensity;
+
+          const currentSunColor =
+            p <= 0.5
+              ? daySunColor.clone().lerp(sunsetSunColor, p * 2)
+              : sunsetSunColor.clone().lerp(nightMoonColor, (p - 0.5) * 2);
+          dirLightRef.current.color.copy(currentSunColor);
+        }
+
+        // 2. Luz Ambiental, Hemisférica e Zenital
+        if (ambientLightRef.current) {
+          ambientLightRef.current.intensity = THREE.MathUtils.lerp(0.48, 0.14, p);
+          const ambColor =
+            p <= 0.5
+              ? dayAmbColor.clone().lerp(sunsetAmbColor, p * 2)
+              : sunsetAmbColor.clone().lerp(nightAmbColor, (p - 0.5) * 2);
+          ambientLightRef.current.color.copy(ambColor);
+        }
+
+        if (hemiLightRef.current) {
+          hemiLightRef.current.intensity = THREE.MathUtils.lerp(0.68, 0.25, p);
+        }
+
+        if (zenithSpotRef.current) {
+          zenithSpotRef.current.intensity = THREE.MathUtils.lerp(42, 4.5, p);
+        }
+
+        // 3. Background do Céu e Fog migrando de azul limpo para gradiente escuro crepuscular
+        const bgColor =
+          p <= 0.5
+            ? dayBg.clone().lerp(sunsetBg, p * 2)
+            : sunsetBg.clone().lerp(nightBg, (p - 0.5) * 2);
+
+        scene.background = bgColor;
+        if (scene.fog instanceof THREE.Fog) {
+          scene.fog.color.copy(bgColor);
+          scene.fog.near = THREE.MathUtils.lerp(24, 16, p);
+          scene.fog.far = THREE.MathUtils.lerp(95, 65, p);
+        }
+
+        // Atualiza o shader atmosférico <Sky> durante o curso da animação
+        const turbidity =
+          p <= 0.5
+            ? THREE.MathUtils.lerp(2.2, 9.2, p * 2)
+            : THREE.MathUtils.lerp(9.2, 10.5, (p - 0.5) * 2);
+        const rayleigh =
+          p <= 0.5
+            ? THREE.MathUtils.lerp(0.75, 3.0, p * 2)
+            : THREE.MathUtils.lerp(3.0, 0.15, (p - 0.5) * 2);
+
+        setSkyParams({
+          sunPosition: [sunX, sunY, sunZ],
+          turbidity,
+          rayleigh,
+          isNightSky: p > 0.78,
+        });
+      },
+    });
+  }, [timeOfDay, scene]);
 
   const shadowMapSize = qualityPreset === 'ultra' ? 2048 : 1024;
+  const envIntensity =
+    timeOfDay === 'day' ? 1.2 : timeOfDay === 'sunset' ? 1.0 : 0.6;
 
   return (
     <>
-      {/* PCSS Soft Shadows estilo Unreal Engine */}
       <SoftShadows
-        size={qualityPreset === 'ultra' ? 28 : 18}
-        samples={qualityPreset === 'ultra' ? 16 : 10}
+        size={qualityPreset === 'ultra' ? 28 : 16}
+        samples={qualityPreset === 'ultra' ? 16 : 8}
         focus={0.5}
       />
 
-      <color attach="background" args={[envConfig.fogColor]} />
-      <fog
-        attach="fog"
-        args={[envConfig.fogColor, envConfig.fogNear, envConfig.fogFar]}
-      />
+      <fog attach="fog" args={['#1a1520', 20, 78]} />
 
-      {/* Iluminação Ambiental e Hemisférica */}
-      <ambientLight
-        intensity={envConfig.ambientIntensity}
-        color={envConfig.ambientColor}
-      />
+      <ambientLight ref={ambientLightRef} intensity={0.3} color="#ffb38a" />
       <hemisphereLight
-        args={[
-          envConfig.hemiSky,
-          envConfig.hemiGround,
-          envConfig.hemiIntensity,
-        ]}
+        ref={hemiLightRef}
+        args={['#ff9e6d', '#1f1924', 0.55]}
       />
 
-      {/* Sol / Luar Direcional Principal com Sombras Suaves de Alta Resolução */}
+      {/* Luz Solar Direcional Animada em 1.5s */}
       <directionalLight
-        position={envConfig.sunPosition}
-        intensity={envConfig.directionalIntensity}
-        color={envConfig.directionalColor}
+        ref={dirLightRef}
+        position={[-26, 4.8, -16]}
+        intensity={2.4}
+        color="#ff8e47"
         castShadow
         shadow-mapSize={[shadowMapSize, shadowMapSize]}
         shadow-camera-left={-18}
@@ -132,56 +187,66 @@ export function EnvironmentSetup() {
         shadow-normalBias={0.02}
       />
 
-      {/* Luz Zenital Dedicada atravessando as Claraboias do Teto */}
+      {/* Claraboia Zenital */}
       <spotLight
-        position={[-1.2, 12.5, -0.5]}
+        ref={zenithSpotRef}
+        position={[3.8, 11.5, -0.2]}
         angle={0.55}
         penumbra={0.85}
-        intensity={envConfig.zenithLightIntensity * 18}
-        color={envConfig.directionalColor}
+        intensity={24}
+        color="#fff0d8"
         castShadow={qualityPreset === 'ultra'}
         shadow-bias={-0.0002}
         distance={24}
       />
 
-      {/* HDRI Dinâmico Físico (<Environment>) para Reflexos PBR em Vidros e Metais */}
+      {/* HDRI Dinâmico Físico (<Environment>) */}
       <Environment
-        resolution={512}
+        resolution={qualityPreset === 'ultra' ? 512 : 256}
         frames={1}
-        environmentIntensity={envConfig.envIntensity}
+        environmentIntensity={envIntensity}
       >
-        <color attach="background" args={[envConfig.skyZenithColor]} />
-        {/* Domo Zenital */}
+        <color
+          attach="background"
+          args={[
+            timeOfDay === 'day'
+              ? '#9ec5ff'
+              : timeOfDay === 'sunset'
+              ? '#3b2d54'
+              : '#0b132b',
+          ]}
+        />
         <Lightformer
           form="rect"
-          intensity={envConfig.zenithLightIntensity}
-          color={envConfig.skyZenithColor}
+          intensity={timeOfDay === 'day' ? 2.4 : timeOfDay === 'sunset' ? 1.4 : 0.5}
+          color={
+            timeOfDay === 'day'
+              ? '#9ec5ff'
+              : timeOfDay === 'sunset'
+              ? '#ff7b3d'
+              : '#1c2541'
+          }
           scale={[30, 30, 1]}
           position={[0, 15, 0]}
           rotation={[Math.PI / 2, 0, 0]}
         />
-        {/* Faixa do Horizonte */}
         <Lightformer
           form="ring"
-          intensity={2.2}
-          color={envConfig.skyHorizonColor}
+          intensity={2.0}
+          color={
+            timeOfDay === 'day'
+              ? '#fff4e0'
+              : timeOfDay === 'sunset'
+              ? '#ff7b3d'
+              : '#1c2541'
+          }
           scale={[40, 40, 1]}
           position={[0, 2, 0]}
           rotation={[Math.PI / 2, 0, 0]}
         />
-        {/* Disco Solar HDR para Especularidade Realista */}
-        <Lightformer
-          form="circle"
-          intensity={envConfig.sunLightformerIntensity}
-          color={envConfig.sunLightformerColor}
-          scale={[6, 6, 1]}
-          position={envConfig.sunPosition}
-          target={[0, 0, 0]}
-        />
-        {/* Rebatedor de Luz Quente Interna para Reflexos Convincentes */}
         <Lightformer
           form="rect"
-          intensity={timeOfDay === 'night' ? 3.5 : 1.5}
+          intensity={timeOfDay === 'night' ? 3.8 : 1.6}
           color="#ffd296"
           scale={[10, 4, 1]}
           position={[0, 3, -8]}
@@ -189,13 +254,13 @@ export function EnvironmentSetup() {
         />
       </Environment>
 
-      {/* Céu Atmosférico Físico (Dia / Entardecer) ou Campo Estelar (Noite) */}
-      {timeOfDay !== 'night' ? (
+      {/* Céu Físico Interpolado ou Estrelas no Crepúsculo Noturno */}
+      {!skyParams.isNightSky ? (
         <Sky
           distance={450000}
-          sunPosition={envConfig.sunPosition}
-          turbidity={envConfig.turbidity}
-          rayleigh={envConfig.rayleigh}
+          sunPosition={skyParams.sunPosition}
+          turbidity={skyParams.turbidity}
+          rayleigh={skyParams.rayleigh}
           mieCoefficient={0.005}
           mieDirectionalG={0.82}
         />
@@ -211,17 +276,18 @@ export function EnvironmentSetup() {
         />
       )}
 
-      {/* Contact Shadows para ancoragem realista do mobiliário no piso */}
-      <ContactShadows
-        position={[0, 0.165, 0]}
-        opacity={qualityPreset === 'ultra' ? 0.55 : 0.35}
-        scale={32}
-        blur={1.7}
-        far={6}
-        resolution={qualityPreset === 'ultra' ? 512 : 256}
-        color="#080706"
-      />
+      {/* Reflexos / Sombras de Contato habilitados no perfil gráfico completo (60 FPS / Ultra) */}
+      {qualityPreset === 'ultra' && (
+        <ContactShadows
+          position={[0, 0.165, 0]}
+          opacity={0.55}
+          scale={32}
+          blur={1.7}
+          far={6}
+          resolution={512}
+          color="#080706"
+        />
+      )}
     </>
   );
 }
-

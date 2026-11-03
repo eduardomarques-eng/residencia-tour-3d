@@ -216,3 +216,4 @@ runOptimization().catch((err) => {
   console.error('\n[ERRO] Falha ao otimizar o modelo 3D:', err);
   process.exit(1);
 });
+

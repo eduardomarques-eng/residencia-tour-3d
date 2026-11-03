@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber';
 import { useGLTF, MeshReflectorMaterial } from '@react-three/drei';
 import { DRACOLoader, MeshoptDecoder } from 'three-stdlib';
 import * as THREE from 'three';
+import gsap from 'gsap';
 import { useTourStore, TimeOfDay } from '@/store/useTourStore';
 
 const GLB_MODEL_URL = '/models/residencia.glb';
@@ -80,6 +81,7 @@ export function configureSceneNodes(
         mat.envMapIntensity = 1.2;
 
         // Tratamento especial para malhas nomeadas com prefixo LIGHT_ ou EMISSIVE_
+        // Interpolação fluida de 1.5s simulando o acendimento gradual de spots e perfis lineares de LED
         if (isLightOrEmissive) {
           if (!mat.emissive || mat.emissive.getHex() === 0x000000) {
             mat.emissive = new THREE.Color('#ffdfa3');
@@ -87,8 +89,13 @@ export function configureSceneNodes(
           if (mat.map && !mat.emissiveMap) {
             mat.emissiveMap = mat.map;
           }
-          mat.emissiveIntensity = lightEmissiveIntensity;
           mat.toneMapped = false;
+          gsap.killTweensOf(mat);
+          gsap.to(mat, {
+            emissiveIntensity: lightEmissiveIntensity,
+            duration: 1.5,
+            ease: 'power2.inOut',
+          });
         }
 
         mat.needsUpdate = true;

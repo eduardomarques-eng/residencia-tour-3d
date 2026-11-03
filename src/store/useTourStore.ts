@@ -121,6 +121,8 @@ interface TourState {
   currentRoom: RoomId;
   navigationMode: NavigationMode;
   qualityPreset: QualityPreset;
+  adaptiveDpr: number;
+  currentFps: number;
   timeOfDay: TimeOfDay;
   pointsOfInterest: PointOfInterest[];
   isTransitioning: boolean;
@@ -131,6 +133,7 @@ interface TourState {
   setCurrentRoom: (room: RoomId) => void;
   setNavigationMode: (mode: NavigationMode) => void;
   setQualityPreset: (preset: QualityPreset) => void;
+  setAdaptivePerformance: (dpr: number, preset: QualityPreset, fps?: number) => void;
   setTimeOfDay: (time: TimeOfDay) => void;
   setIsTransitioning: (isTransitioning: boolean) => void;
   setShowHotspots: (show: boolean) => void;
@@ -144,6 +147,8 @@ export const useTourStore = create<TourState>((set, get) => ({
   currentRoom: 'living',
   navigationMode: 'walk',
   qualityPreset: 'ultra',
+  adaptiveDpr: 2,
+  currentFps: 60,
   timeOfDay: 'sunset',
   pointsOfInterest: POINTS_OF_INTEREST,
   isTransitioning: false,
@@ -163,7 +168,15 @@ export const useTourStore = create<TourState>((set, get) => ({
   setQualityPreset: (preset) =>
     set({
       qualityPreset: preset,
+      adaptiveDpr: preset === 'ultra' ? 2 : 1,
     }),
+
+  setAdaptivePerformance: (dpr, preset, fps) =>
+    set((state) => ({
+      adaptiveDpr: dpr,
+      qualityPreset: preset,
+      currentFps: fps ?? state.currentFps,
+    })),
 
   setTimeOfDay: (time) =>
     set({

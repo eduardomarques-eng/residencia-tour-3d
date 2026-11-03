@@ -30,7 +30,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Keep 3D models directory and .glb assets versioned (< 100MB)
+# Keep 3D models directory and .glb assets versioned (< 100MB), ignoring raw unoptimized input
 !/public/models/
 !/public/models/**
 !/public/models/*.glb
+/public/models/residencia-raw.glb
+
+.vercel

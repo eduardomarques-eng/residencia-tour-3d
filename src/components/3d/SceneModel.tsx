@@ -3,11 +3,36 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF, MeshReflectorMaterial } from '@react-three/drei';
+import { DRACOLoader, MeshoptDecoder } from 'three-stdlib';
 import * as THREE from 'three';
 import { useTourStore, TimeOfDay } from '@/store/useTourStore';
 
 const GLB_MODEL_URL = '/models/residencia.glb';
-const DRACO_DECODER_PATH = '/draco-gltf/';
+const LOCAL_DRACO_DECODER_PATH = '/draco-gltf/';
+const CDN_DRACO_DECODER_PATH =
+  'https://www.gstatic.com/draco/versioned/decoders/1.5.7/';
+
+// Singleton do DRACOLoader otimizado para Mobile e Desktop para não recriar nem travar Web Workers
+let sharedDracoLoader: DRACOLoader | null = null;
+
+function getOptimizedDracoLoader(decoderPath: string): DRACOLoader {
+  if (!sharedDracoLoader) {
+    sharedDracoLoader = new DRACOLoader();
+    const isMobile =
+      typeof navigator !== 'undefined' &&
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const cores =
+      typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+        ? navigator.hardwareConcurrency
+        : 4;
+    // Limita o pool de Web Workers no mobile (máx 2) para evitar picos de memória WASM e travamentos
+    const workerLimit = isMobile ? Math.min(2, cores) : Math.min(4, cores);
+    sharedDracoLoader.setWorkerLimit(workerLimit);
+    sharedDracoLoader.setDecoderConfig({ type: 'wasm' });
+  }
+  sharedDracoLoader.setDecoderPath(decoderPath);
+  return sharedDracoLoader;
+}
 
 /**
  * Percorre todos os nós da cena (seja do arquivo /models/residencia.glb do 3ds Max ou do fallback procedural),
@@ -73,10 +98,23 @@ export function configureSceneNodes(
 }
 
 /**
- * Subcomponente leitor do arquivo final /public/models/residencia.glb com suporte a Draco Decoder (/draco-gltf/)
+ * Subcomponente leitor do arquivo final /public/models/residencia.glb com suporte a Draco Decoder
+ * (pasta local estática /draco-gltf/ ou CDN pública) e MeshoptDecoder sem travar o worker no mobile.
  */
-function GltfSceneReader({ url }: { url: string }) {
-  const { scene } = useGLTF(url, DRACO_DECODER_PATH);
+function GltfSceneReader({
+  url,
+  decoderPath,
+}: {
+  url: string;
+  decoderPath: string;
+}) {
+  const { scene } = useGLTF(url, decoderPath, true, (loader) => {
+    const dracoLoader = getOptimizedDracoLoader(decoderPath);
+    loader.setDRACOLoader(dracoLoader);
+    if (MeshoptDecoder) {
+      loader.setMeshoptDecoder(MeshoptDecoder);
+    }
+  });
   const { timeOfDay } = useTourStore();
 
   useEffect(() => {
@@ -656,9 +694,33 @@ function ProceduralArchitecturalFallback() {
 
 export function SceneModel() {
   const [hasFinalGlb, setHasFinalGlb] = useState<boolean>(false);
+  const [decoderPath, setDecoderPath] = useState<string>(
+    LOCAL_DRACO_DECODER_PATH
+  );
 
   useEffect(() => {
     let isMounted = true;
+
+    // Verifica disponibilidade do Draco Decoder local estático (/draco-gltf/) com fallback para CDN pública
+    fetch(`${LOCAL_DRACO_DECODER_PATH}draco_decoder.wasm`, { method: 'HEAD' })
+      .then((res) => {
+        const resolvedPath =
+          res.ok && !res.headers.get('content-type')?.includes('text/html')
+            ? LOCAL_DRACO_DECODER_PATH
+            : CDN_DRACO_DECODER_PATH;
+        if (isMounted) {
+          setDecoderPath(resolvedPath);
+          useGLTF.setDecoderPath(resolvedPath);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setDecoderPath(CDN_DRACO_DECODER_PATH);
+          useGLTF.setDecoderPath(CDN_DRACO_DECODER_PATH);
+        }
+      });
+
+    // Verifica se o modelo de produção /models/residencia.glb existe
     fetch(GLB_MODEL_URL, { method: 'HEAD' })
       .then((res) => {
         if (
@@ -679,7 +741,7 @@ export function SceneModel() {
   }, []);
 
   if (hasFinalGlb) {
-    return <GltfSceneReader url={GLB_MODEL_URL} />;
+    return <GltfSceneReader url={GLB_MODEL_URL} decoderPath={decoderPath} />;
   }
 
   return <ProceduralArchitecturalFallback />;

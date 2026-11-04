@@ -9,6 +9,7 @@ import { useTourStore, RoomId, Vector3Tuple } from '@/store/useTourStore';
 
 const EYE_HEIGHT = 1.65;
 const TRANSITION_DURATION = 1.2;
+const AUTO_TOUR_PAUSE_MS = 6000;
 
 export interface RoomCameraConfig {
   id: RoomId;
@@ -72,12 +73,14 @@ interface FloorHotspotMarkerProps {
   config: RoomCameraConfig;
   isActive: boolean;
   onSelect: (config: RoomCameraConfig) => void;
+  onOpenSpecs: (roomId: RoomId) => void;
 }
 
 function FloorHotspotMarker({
   config,
   isActive,
   onSelect,
+  onOpenSpecs,
 }: FloorHotspotMarkerProps) {
   const pulseRingRef = useRef<THREE.Mesh>(null);
   const outerMatRef = useRef<THREE.MeshBasicMaterial>(null);
@@ -160,29 +163,45 @@ function FloorHotspotMarker({
         />
       </mesh>
 
-      {/* Etiqueta Flutuante Discreta */}
+      {/* Etiqueta Flutuante com Botão Discreto "+" para Abrir Especificações Arquitetônicas */}
       <Html
-        position={[0, 0.32, 0]}
+        position={[0, 0.34, 0]}
         center
         distanceFactor={11}
         zIndexRange={[10, 0]}
       >
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect(config);
-          }}
-          className={`px-2.5 py-1 rounded-full text-[11px] font-medium tracking-wide backdrop-blur-md border transition-all duration-300 whitespace-nowrap select-none shadow-lg ${
+        <div
+          className={`flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-full text-[11px] font-medium tracking-wide backdrop-blur-md border transition-all duration-300 whitespace-nowrap select-none shadow-lg ${
             isActive
               ? 'bg-amber-300/25 border-amber-200/60 text-amber-100'
               : hovered
               ? 'bg-zinc-900/90 border-amber-200/50 text-white scale-105'
-              : 'bg-zinc-950/70 border-white/15 text-zinc-200 hover:text-white'
+              : 'bg-zinc-950/75 border-white/15 text-zinc-200 hover:text-white'
           }`}
         >
-          {config.label}
-        </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(config);
+            }}
+            className="pr-1"
+          >
+            {config.label}
+          </button>
+          <button
+            type="button"
+            title={`Ver especificações de ${config.label}`}
+            aria-label={`Ver especificações de ${config.label}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenSpecs(config.id);
+            }}
+            className="w-5 h-5 rounded-full bg-white/10 hover:bg-amber-300/35 border border-white/20 hover:border-amber-200 flex items-center justify-center text-amber-200 hover:text-white font-semibold text-xs leading-none transition-colors"
+          >
+            +
+          </button>
+        </div>
       </Html>
     </group>
   );
@@ -196,7 +215,12 @@ export function CameraController() {
     setCurrentRoom,
     navigationMode,
     showHotspots,
+    isTransitioning,
     setIsTransitioning,
+    isAutoTour,
+    setIsAutoTour,
+    nextRoom,
+    openRoomSpecs,
   } = useTourStore();
 
   const keysPressed = useRef<Record<string, boolean>>({});
@@ -219,7 +243,6 @@ export function CameraController() {
     };
   }, []);
 
-  // Função auxiliar para caminhar/olhar em 1ª pessoa mantendo rotação 360° no próprio eixo
   const moveCameraToLookAt = useCallback(
     (
       pos: Vector3Tuple,
@@ -230,14 +253,12 @@ export function CameraController() {
       const controls = controlsRef.current;
       if (!controls) return;
 
-      // Duração de 1.2s com desaceleração suave (easeOut)
       controls.smoothTime = TRANSITION_DURATION;
 
       if (mode === 'walk') {
         const startVec = new THREE.Vector3(pos[0], pos[1], pos[2]);
         const targetVec = new THREE.Vector3(target[0], target[1], target[2]);
         const lookDir = targetVec.clone().sub(startVec).normalize();
-        // Posiciona o ponto focal muito próximo à câmera (0.25m) para rotação 360° em 1ª pessoa
         const nearTarget = startVec.clone().add(lookDir.multiplyScalar(0.25));
 
         setIsTransitioning(true);
@@ -283,13 +304,11 @@ export function CameraController() {
     controls.draggingSmoothTime = 0.12;
 
     if (navigationMode === 'walk') {
-      // Desktop Walk: botão esquerdo gira visão 360°, scroll faz zoom sutil de FOV/dolly
       controls.mouseButtons.left = CameraControlsImpl.ACTION.ROTATE;
       controls.mouseButtons.right = CameraControlsImpl.ACTION.NONE;
       controls.mouseButtons.middle = CameraControlsImpl.ACTION.DOLLY;
       controls.mouseButtons.wheel = CameraControlsImpl.ACTION.ZOOM;
 
-      // Mobile Walk: 1 dedo gira 360°, 2 dedos (pinch) fazem zoom
       controls.touches.one = CameraControlsImpl.ACTION.TOUCH_ROTATE;
       controls.touches.two = CameraControlsImpl.ACTION.TOUCH_ZOOM;
       controls.touches.three = CameraControlsImpl.ACTION.NONE;
@@ -300,17 +319,14 @@ export function CameraController() {
       controls.maxDistance = 2.5;
       controls.minPolarAngle = Math.PI * 0.22;
       controls.maxPolarAngle = Math.PI * 0.78;
-      // Inverte sentido azimutal/polar para sensação natural de olhar ao redor em 1ª pessoa
       controls.azimuthRotateSpeed = -0.55;
       controls.polarRotateSpeed = -0.45;
     } else {
-      // Desktop Orbit: órbita livre com botão esquerdo, pan com direito, zoom no scroll
       controls.mouseButtons.left = CameraControlsImpl.ACTION.ROTATE;
       controls.mouseButtons.right = CameraControlsImpl.ACTION.TRUCK;
       controls.mouseButtons.middle = CameraControlsImpl.ACTION.DOLLY;
       controls.mouseButtons.wheel = CameraControlsImpl.ACTION.DOLLY;
 
-      // Mobile Orbit: 1 dedo gira, 2 dedos (pinch) fazem dolly/zoom
       controls.touches.one = CameraControlsImpl.ACTION.TOUCH_ROTATE;
       controls.touches.two = CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK;
       controls.touches.three = CameraControlsImpl.ACTION.TOUCH_TRUCK;
@@ -342,10 +358,29 @@ export function CameraController() {
     }
   }, [currentRoom, navigationMode, moveCameraToLookAt]);
 
-  // Locomoção contínua por teclado WASD no modo 'walk' mantendo altura dos olhos fixa em Y = 1.65m
-  useFrame((_, delta) => {
+  // Temporizador do Modo Auto-Tour: pausa 6 segundos em cada cômodo antes de avançar na sequência
+  useEffect(() => {
+    if (!isAutoTour) return;
+
+    const timer = setTimeout(() => {
+      nextRoom();
+    }, AUTO_TOUR_PAUSE_MS + TRANSITION_DURATION * 1000);
+
+    return () => clearTimeout(timer);
+  }, [isAutoTour, currentRoom, nextRoom]);
+
+  // Locomoção WASD + Leve Rotação Panorâmica durante os 6s de pausa do Modo Auto-Tour
+  useFrame(({ clock }, delta) => {
     const controls = controlsRef.current;
-    if (navigationMode !== 'walk' || !controls) return;
+    if (!controls) return;
+
+    // Se o Modo Auto-Tour está ativo e a transição entre salas já concluiu, realiza leve rotação panorâmica
+    if (isAutoTour && !isTransitioning) {
+      const swayDir = Math.sin(clock.getElapsedTime() * 0.45) >= 0 ? 1 : -1;
+      void controls.rotate(delta * 0.09 * swayDir, 0, false);
+    }
+
+    if (navigationMode !== 'walk') return;
 
     const moveSpeed = 3.4 * delta;
     const forward = new THREE.Vector3();
@@ -373,6 +408,7 @@ export function CameraController() {
     }
 
     if (moveOffset.lengthSq() > 0) {
+      if (isAutoTour) setIsAutoTour(false);
       moveOffset.normalize().multiplyScalar(moveSpeed);
 
       const currentPos = new THREE.Vector3();
@@ -400,7 +436,6 @@ export function CameraController() {
     }
   });
 
-  // Caminhar suavemente até um ponto clicado/tocado no piso mantendo Y = 1.65m
   const handleFloorPointerDown = (e: ThreeEvent<PointerEvent>) => {
     pointerDownPos.current = { x: e.clientX, y: e.clientY };
   };
@@ -408,7 +443,6 @@ export function CameraController() {
   const handleFloorClick = (e: ThreeEvent<MouseEvent>) => {
     if (navigationMode !== 'walk') return;
 
-    // Ignora caso o usuário estivesse arrastando a câmera (swipe/rotate)
     const dx = e.clientX - pointerDownPos.current.x;
     const dy = e.clientY - pointerDownPos.current.y;
     if (Math.hypot(dx, dy) > 6) return;
@@ -416,13 +450,12 @@ export function CameraController() {
     const controls = controlsRef.current;
     if (!controls) return;
 
+    if (isAutoTour) setIsAutoTour(false);
+
     const hitPoint = e.point;
     const currentPos = new THREE.Vector3();
-    const currentTarget = new THREE.Vector3();
     controls.getPosition(currentPos);
-    controls.getTarget(currentTarget);
 
-    // Mantém a direção horizontal para onde o usuário está olhando ou olha na direção da caminhada
     const walkDir = new THREE.Vector3(
       hitPoint.x - currentPos.x,
       0,
@@ -449,6 +482,7 @@ export function CameraController() {
   };
 
   const handleHotspotSelect = (config: RoomCameraConfig) => {
+    if (isAutoTour) setIsAutoTour(false);
     if (config.id === currentRoom && navigationMode === 'walk') {
       moveCameraToLookAt(config.position, config.target, 'walk', true);
     } else {
@@ -465,7 +499,7 @@ export function CameraController() {
         draggingSmoothTime={0.12}
       />
 
-      {/* Plano Invisível de Teletransporte/Caminhada por Toque no Piso */}
+      {/* Plano Invisível de Caminhada por Toque no Piso */}
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.17, 2.0]}
@@ -477,7 +511,7 @@ export function CameraController() {
         <meshBasicMaterial transparent opacity={0} />
       </mesh>
 
-      {/* Marcadores Circulares 3D Flutuantes no Piso com Pulso Sutil */}
+      {/* Marcadores Circulares 3D no Piso com Pulso Sutil + Botão "+" de Especificações */}
       {showHotspots && (
         <group name="FloorHotspotsGroup">
           {Object.values(ROOM_CAMERA_PRESETS).map((config) => (
@@ -486,6 +520,7 @@ export function CameraController() {
               config={config}
               isActive={currentRoom === config.id}
               onSelect={handleHotspotSelect}
+              onOpenSpecs={openRoomSpecs}
             />
           ))}
         </group>
@@ -493,4 +528,3 @@ export function CameraController() {
     </>
   );
 }
-

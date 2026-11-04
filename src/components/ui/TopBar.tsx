@@ -14,6 +14,8 @@ import {
   Compass,
   Eye,
   EyeOff,
+  Play,
+  Pause,
 } from 'lucide-react';
 import {
   useTourStore,
@@ -31,6 +33,9 @@ export function TopBar() {
     setQualityPreset,
     showHotspots,
     setShowHotspots,
+    isAutoTour,
+    toggleAutoTour,
+    setIsAutoTour,
     getCurrentPOI,
   } = useTourStore();
 
@@ -59,7 +64,12 @@ export function TopBar() {
     }
   }, []);
 
-  const navModes: { id: NavigationMode; label: string; shortLabel: string; icon: React.ReactNode }[] = [
+  const navModes: {
+    id: NavigationMode;
+    label: string;
+    shortLabel: string;
+    icon: React.ReactNode;
+  }[] = [
     {
       id: 'walk',
       label: 'Passeio Virtual (1ª Pessoa)',
@@ -74,9 +84,17 @@ export function TopBar() {
     },
   ];
 
-  const lightingModes: { id: TimeOfDay; label: string; icon: React.ReactNode }[] = [
+  const lightingModes: {
+    id: TimeOfDay;
+    label: string;
+    icon: React.ReactNode;
+  }[] = [
     { id: 'day', label: 'Dia', icon: <Sun className="w-3.5 h-3.5" /> },
-    { id: 'sunset', label: 'Entardecer', icon: <Sunset className="w-3.5 h-3.5" /> },
+    {
+      id: 'sunset',
+      label: 'Entardecer',
+      icon: <Sunset className="w-3.5 h-3.5" />,
+    },
     { id: 'night', label: 'Noite', icon: <Moon className="w-3.5 h-3.5" /> },
   ];
 
@@ -107,34 +125,69 @@ export function TopBar() {
           </div>
         </div>
 
-        {/* Controles Centrais: Modo de Navegação (Passeio 1ª Pessoa vs Visão Geral Órbita) */}
-        <div className="pointer-events-auto flex items-center bg-zinc-950/65 backdrop-blur-md border border-white/10 rounded-2xl p-1 shadow-[0_8px_32px_rgba(0,0,0,0.45)]">
-          {navModes.map((mode) => {
-            const isActive = navigationMode === mode.id;
-            return (
-              <button
-                key={mode.id}
-                type="button"
-                onClick={() => setNavigationMode(mode.id)}
-                className={`relative flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all duration-300 ${
-                  isActive
-                    ? 'bg-white/12 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2)] border border-white/15'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5 border border-transparent'
-                }`}
-              >
-                <span className={isActive ? 'text-amber-200' : 'text-zinc-400'}>
-                  {mode.icon}
+        {/* Controles Centrais: Modo de Navegação + Botão Passeio Guiado (Auto-Tour) */}
+        <div className="pointer-events-auto flex items-center gap-2">
+          <div className="flex items-center bg-zinc-950/65 backdrop-blur-md border border-white/10 rounded-2xl p-1 shadow-[0_8px_32px_rgba(0,0,0,0.45)]">
+            {navModes.map((mode) => {
+              const isActive = navigationMode === mode.id && !isAutoTour;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => {
+                    setIsAutoTour(false);
+                    setNavigationMode(mode.id);
+                  }}
+                  className={`relative flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all duration-300 ${
+                    isActive
+                      ? 'bg-white/12 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.2)] border border-white/15'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  <span className={isActive ? 'text-amber-200' : 'text-zinc-400'}>
+                    {mode.icon}
+                  </span>
+                  <span className="hidden lg:inline tracking-wide">
+                    {mode.label}
+                  </span>
+                  <span className="lg:hidden tracking-wide">
+                    {mode.shortLabel}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Botão Passeio Guiado (Auto-Tour 6s por ambiente com rotação panorâmica) */}
+          <button
+            type="button"
+            onClick={toggleAutoTour}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-medium backdrop-blur-md border transition-all duration-300 shadow-[0_8px_32px_rgba(0,0,0,0.45)] ${
+              isAutoTour
+                ? 'bg-amber-300/20 border-amber-200/50 text-amber-100 shadow-[0_0_24px_rgba(251,191,36,0.2)]'
+                : 'bg-zinc-950/65 border-white/10 hover:border-amber-200/30 text-zinc-200 hover:text-white'
+            }`}
+          >
+            {isAutoTour ? (
+              <>
+                <Pause className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+                <span className="tracking-wide">Passeio Guiado</span>
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
                 </span>
-                <span className="hidden lg:inline tracking-wide">{mode.label}</span>
-                <span className="lg:hidden tracking-wide">{mode.shortLabel}</span>
-              </button>
-            );
-          })}
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5 text-amber-200" />
+                <span className="tracking-wide">Passeio Guiado</span>
+              </>
+            )}
+          </button>
         </div>
 
         {/* Controles Direitos: Iluminação (Dia/Entardecer/Noite), Qualidade, Hotspots e Tela Cheia */}
         <div className="pointer-events-auto flex items-center gap-2">
-          {/* Seletor de Iluminação Solar */}
           <div
             className="flex items-center bg-zinc-950/65 backdrop-blur-md border border-white/10 rounded-2xl p-1 shadow-[0_8px_32px_rgba(0,0,0,0.45)]"
             role="group"
@@ -157,17 +210,20 @@ export function TopBar() {
                   <span className={isActive ? 'text-amber-300' : 'text-zinc-400'}>
                     {light.icon}
                   </span>
-                  <span className="hidden sm:inline tracking-wide">{light.label}</span>
+                  <span className="hidden sm:inline tracking-wide">
+                    {light.label}
+                  </span>
                 </button>
               );
             })}
           </div>
 
-          {/* Botão de Hotspots 3D */}
           <button
             type="button"
             onClick={() => setShowHotspots(!showHotspots)}
-            title={showHotspots ? 'Ocultar Marcadores 3D' : 'Mostrar Marcadores 3D'}
+            title={
+              showHotspots ? 'Ocultar Marcadores 3D' : 'Mostrar Marcadores 3D'
+            }
             className={`hidden md:flex items-center gap-1.5 px-3 py-2.5 rounded-2xl text-xs font-medium bg-zinc-950/65 backdrop-blur-md border transition-all duration-300 shadow-[0_8px_32px_rgba(0,0,0,0.45)] ${
               showHotspots
                 ? 'border-white/15 text-zinc-200 hover:bg-white/10'
@@ -182,14 +238,15 @@ export function TopBar() {
             <span className="hidden xl:inline">Pins</span>
           </button>
 
-          {/* Seletor de Qualidade Gráfica (Ultra vs Balanced) */}
           <button
             type="button"
             onClick={() =>
               setQualityPreset(qualityPreset === 'ultra' ? 'balanced' : 'ultra')
             }
             title={`Qualidade Gráfica: ${
-              qualityPreset === 'ultra' ? 'Ultra (Pós-processamento + Sombras HD)' : 'Equilibrado (60 FPS)'
+              qualityPreset === 'ultra'
+                ? 'Ultra (Pós-processamento + Sombras HD)'
+                : 'Equilibrado (60 FPS)'
             }`}
             className="flex items-center gap-1.5 px-3 py-2.5 rounded-2xl text-xs font-medium bg-zinc-950/65 backdrop-blur-md border border-white/10 hover:border-white/20 text-zinc-200 transition-all duration-300 shadow-[0_8px_32px_rgba(0,0,0,0.45)]"
           >
@@ -206,7 +263,6 @@ export function TopBar() {
             )}
           </button>
 
-          {/* Botão Tela Cheia */}
           <button
             type="button"
             onClick={toggleFullscreen}
@@ -225,4 +281,3 @@ export function TopBar() {
     </header>
   );
 }
-
